@@ -1,28 +1,43 @@
 section .text
 global install_hook
 global my_hook
+; global copyInstruction
+; global overwrite
+; global nopWrite
+; global complete
 
-; rdi= original_func, rsi= hook, rdx= trampoline
+; rdi= original_func, rsi= hook, rdx= trampoline, rcx= length
 install_hook:
     push rbx
+    push r12
 
-    ;copy first 5 bytes of original_func to trampoline
-    mov eax, dword[rdi]         ;read first 4 bytes
-    mov dword[rdx], eax         ;write those bytes to trampoline addr
-    mov al, byte[rdi + 4]       ;read 5th byte
-    mov byte[rdx + 4], al       ;write to trampoline
+    mov r12, rcx
+    xor rbx, rbx
 
-    ;now jump after 5bytes trampoline-> [original_func + 5]
-    ;return to = rdi + 5 from trampoline
+copyInstruction:
+    cmp rbx, r12                 ;if i>=length then break
+    jge overwrite
+
+    mov al, byte[rdi + rbx]     ;read from original function
+    mov byte[rdx + rbx], al     ;write to trampoline
+
+    inc rbx
+    jmp copyInstruction
+
+overwrite:
+    ;now jump after n bytes trampoline-> [original_func + length]
+    ;return to = rdi + length from trampoline
     mov rbx, rdi                ;rbx = original_func
-    add rbx, 5                  ;rbx + 5 here we have to land
+    add rbx, r12                ;rbx + length here we have to land
+
+    lea rax, [rdx + r12]        ;addr of trampoline where JMP will be written
 
     ;write jmp [RIP+0] (absolute indirect jump)
-    mov byte[rdx + 5], 0xFF
-    mov byte[rdx + 6], 0x25
-    mov dword[rdx + 7], 0x00000000
+    mov byte[rax], 0xFF
+    mov byte[rax + 1], 0x25
+    mov dword[rax + 2], 0x00000000
 
-    mov [rdx + 11], rbx
+    mov [rax + 6], rbx
     mov [trampoline_addr], rdx  ;addr of trampoline
 
     ;calculate JMP offset
@@ -32,7 +47,18 @@ install_hook:
 
     mov byte [rdi], 0xE9        ;opcode E9(jump) at target[0]
     mov dword [rdi + 1], eax    ;write the 32bit offset at target[1]
+    mov rbx, 5                  ;write NOP after this offset
 
+nopWrite:
+    cmp rbx, r12
+    jge complete
+
+    mov byte[rdi + rbx], 0x90   ;write NOP
+    inc rbx
+    jmp nopWrite
+
+complete:
+    pop r12
     pop rbx
     ret
 
